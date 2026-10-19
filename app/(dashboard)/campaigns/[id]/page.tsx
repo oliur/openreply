@@ -40,6 +40,8 @@ interface Campaign {
   emailConfirmMessage?: string | null;
   emailSubject?: string | null;
   emailBody?: string | null;
+  mailroomBrandName?: string | null;
+  mailroomListName?: string | null;
   _count?: { dmLogs?: number; leads?: number };
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
@@ -256,7 +258,10 @@ export default function CampaignDetailPage() {
         )}
 
         <Summary title={t("And then, they will get a DM")}>
-          <FieldBox>{campaign.dmMessage}</FieldBox>
+          <FieldBox>
+            {campaign.dmMessage ||
+              (campaign.emailCaptureEnabled ? campaign.emailPromptMessage : "")}
+          </FieldBox>
           {hasLink && (
             <FieldBox>{campaign.linkButtonLabel || "Open link"}</FieldBox>
           )}
@@ -311,8 +316,25 @@ export default function CampaignDetailPage() {
             <FieldBox>{campaign.emailSubject}</FieldBox>
             <p className="text-xs text-muted">{t("Email body")}</p>
             <FieldBox>
-              <span className="whitespace-pre-wrap">{campaign.emailBody}</span>
+              <span className="whitespace-pre-wrap">
+                {(campaign.emailBody ?? "")
+                  .replace(/<br\s*\/?>/gi, "\n")
+                  .replace(/<\/(p|h[1-6]|li)>/gi, "\n")
+                  .replace(/<[^>]+>/g, "")
+                  .replace(/&amp;/g, "&")
+                  .replace(/&lt;/g, "<")
+                  .replace(/&gt;/g, ">")
+                  .trim()}
+              </span>
             </FieldBox>
+            {campaign.mailroomListName && (
+              <p className="text-xs text-muted">
+                {t("Added to Mailroom list {list} ({brand})", {
+                  list: campaign.mailroomListName,
+                  brand: campaign.mailroomBrandName ?? "",
+                })}
+              </p>
+            )}
             <p className="text-xs text-muted">
               <Link href={`/leads?automationId=${campaign.id}`} className="text-accent hover:underline">
                 {t("{count} leads", { count: campaign._count?.leads ?? 0 })}
@@ -383,7 +405,13 @@ export default function CampaignDetailPage() {
             openingDmEnabled={campaign.openingDmEnabled}
             openingDmMessage={campaign.openingDmMessage ?? ""}
             openingDmButtonLabel={campaign.openingDmButtonLabel ?? ""}
-            revealMessage={campaign.dmMessage}
+            revealMessage={
+              campaign.emailCaptureEnabled && campaign.emailPromptMessage
+                ? [campaign.dmMessage.trim(), campaign.emailPromptMessage.trim()]
+                    .filter(Boolean)
+                    .join("\n\n")
+                : campaign.dmMessage
+            }
             hasLink={hasLink}
             linkButtonLabel={campaign.linkButtonLabel ?? "Open link"}
             linkUrl={

@@ -14,7 +14,9 @@ import {
   POSTBACK_JOB_NAME,
   FOLLOWUP_JOB_NAME,
   LEAD_EMAIL_JOB_NAME,
+  LEAD_MAILROOM_JOB_NAME,
   type SendLeadEmailJob,
+  type SyncLeadToMailroomJob,
   type DmQueueJob,
   type ProcessCommentJob,
   type ProcessMessageJob,
@@ -60,6 +62,7 @@ import {
   appendEmailPrompt,
   handleEmailCaptureReply,
   processLeadEmail,
+  processLeadMailroomSync,
   registerEmailCapture,
 } from "./email-capture";
 
@@ -1604,6 +1607,9 @@ async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
   }
   if (job.name === LEAD_EMAIL_JOB_NAME) {
     return processLeadEmail(job as Job<SendLeadEmailJob>);
+  }
+  if (job.name === LEAD_MAILROOM_JOB_NAME) {
+    return processLeadMailroomSync(job as Job<SyncLeadToMailroomJob>);
   }
   if (job.name === MESSAGE_JOB_NAME) {
     return processMessage(job as Job<ProcessMessageJob>);

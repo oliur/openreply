@@ -83,17 +83,26 @@ export interface SendLeadEmailJob {
   leadId: string;
 }
 
+// Add a captured lead to the campaign's Mailroom list. Idempotent on
+// `mailroomSyncedAt`; Mailroom's upsert makes a retry harmless anyway.
+export interface SyncLeadToMailroomJob {
+  leadId: string;
+  mailroom: true;
+}
+
 export type DmQueueJob =
   | ProcessCommentJob
   | ProcessPostbackJob
   | ProcessFollowUpJob
   | ProcessMessageJob
-  | SendLeadEmailJob;
+  | SendLeadEmailJob
+  | SyncLeadToMailroomJob;
 
 export const POSTBACK_JOB_NAME = "process-postback";
 export const FOLLOWUP_JOB_NAME = "process-followup";
 export const MESSAGE_JOB_NAME = "process-message";
 export const LEAD_EMAIL_JOB_NAME = "send-lead-email";
+export const LEAD_MAILROOM_JOB_NAME = "sync-lead-mailroom";
 
 let dmQueue: Queue<DmQueueJob> | null = null;
 

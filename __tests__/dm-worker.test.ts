@@ -128,6 +128,7 @@ vi.mock("@/lib/queue/client", () => ({
   FOLLOWUP_JOB_NAME: "process-followup",
   MESSAGE_JOB_NAME: "process-message",
   LEAD_EMAIL_JOB_NAME: "send-lead-email",
+  LEAD_MAILROOM_JOB_NAME: "sync-lead-mailroom",
 }));
 
 vi.mock("bullmq", () => {

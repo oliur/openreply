@@ -12,7 +12,10 @@ import nodemailer from "nodemailer";
 export interface OutboundEmail {
   to: string;
   subject: string;
-  text: string;
+  /** Plain-text version; derived from `html` when omitted. */
+  text?: string;
+  /** Body HTML (from the rich-text editor); rendered from `text` when omitted. */
+  html?: string;
 }
 
 export class EmailTransportError extends Error {}
@@ -44,7 +47,39 @@ export function textToHtml(text: string): string {
     )
     .filter((paragraph) => paragraph.trim() !== "")
     .map((paragraph) => `<p>${paragraph}</p>`);
-  return `<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#111">${paragraphs.join("")}</body></html>`;
+  return wrapHtml(paragraphs.join(""));
+}
+
+/** True when a stored body was written with the rich-text editor. */
+export function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][^>]*>/i.test(value);
+}
+
+/** Plain-text rendering of editor HTML, for the text/plain part. */
+export function htmlToText(html: string): string {
+  return html
+    .replace(/\r?\n/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|h[1-6]|li)>/gi, "\n")
+    .replace(/<li[^>]*>/gi, "- ")
+    .replace(/<\/(ul|ol)>/gi, "\n")
+    .replace(/<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, label: string) =>
+      label.trim() && label.trim() !== href ? `${label} (${href})` : href
+    )
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function wrapHtml(body: string): string {
+  return `<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#111">${body}</body></html>`;
 }
 
 export function getEmailFrom(): string {
@@ -57,7 +92,8 @@ export function hasEmailTransport(): boolean {
 
 export async function sendEmail(email: OutboundEmail): Promise<void> {
   const from = getEmailFrom();
-  const html = textToHtml(email.text);
+  const text = email.text ?? (email.html ? htmlToText(email.html) : "");
+  const html = email.html ? wrapHtml(email.html) : textToHtml(text);
 
   if (process.env.EMAIL_SERVER) {
     const transport = nodemailer.createTransport(process.env.EMAIL_SERVER);
@@ -65,7 +101,7 @@ export async function sendEmail(email: OutboundEmail): Promise<void> {
       from,
       to: email.to,
       subject: email.subject,
-      text: email.text,
+      text,
       html,
     });
     return;
@@ -82,7 +118,7 @@ export async function sendEmail(email: OutboundEmail): Promise<void> {
         from,
         to: [email.to],
         subject: email.subject,
-        text: email.text,
+        text,
         html,
       }),
     });

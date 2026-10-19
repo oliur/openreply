@@ -22,7 +22,9 @@ interface Lead {
   capturedAt: string;
   emailSentAt: string | null;
   emailError: string | null;
-  automation: { id: string; name: string };
+  mailroomSyncedAt: string | null;
+  mailroomError: string | null;
+  automation: { id: string; name: string; mailroomListName?: string | null };
   instagramAccount: { username: string };
 }
 
@@ -164,6 +166,7 @@ export default function LeadsPage() {
                 <th className="px-4 py-3 font-medium">{t("Campaign")}</th>
                 <th className="px-4 py-3 font-medium">{t("Captured")}</th>
                 <th className="px-4 py-3 font-medium">{t("Email reply")}</th>
+                <th className="px-4 py-3 font-medium">Mailroom</th>
               </tr>
             </thead>
             <tbody>
@@ -194,6 +197,19 @@ export default function LeadsPage() {
                       </span>
                     ) : (
                       <span className="text-muted">{t("Sending...")}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {lead.mailroomSyncedAt ? (
+                      <span className="text-emerald-500">
+                        {lead.automation.mailroomListName ?? t("Added")}
+                      </span>
+                    ) : lead.mailroomError ? (
+                      <span className="text-red-500" title={lead.mailroomError}>
+                        {t("Failed")}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
                     )}
                   </td>
                 </tr>

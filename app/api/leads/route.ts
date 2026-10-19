@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   };
 
   const include = {
-    automation: { select: { id: true, name: true } },
+    automation: { select: { id: true, name: true, mailroomListName: true } },
     instagramAccount: { select: { username: true } },
   };
 
@@ -52,6 +52,9 @@ export async function GET(request: NextRequest) {
       "captured_at",
       "email_sent_at",
       "email_error",
+      "mailroom_list",
+      "mailroom_synced_at",
+      "mailroom_error",
     ];
     const rows = leads.map((lead) =>
       [
@@ -61,6 +64,9 @@ export async function GET(request: NextRequest) {
         lead.capturedAt.toISOString(),
         lead.emailSentAt?.toISOString() ?? "",
         lead.emailError,
+        lead.automation.mailroomListName,
+        lead.mailroomSyncedAt?.toISOString() ?? "",
+        lead.mailroomError,
       ]
         .map(csvCell)
         .join(",")

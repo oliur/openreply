@@ -36,7 +36,8 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
-    dmMessage: z.string().min(1).max(1000),
+    // May be empty when email capture is on: the email ask is then the DM.
+    dmMessage: z.string().max(1000).optional().default(""),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
     openingDmButtonLabel: z.string().max(64).optional().nullable(),
@@ -61,7 +62,11 @@ const createAutomationSchema = z
     emailConfirmMessage: z.string().max(1000).optional().nullable(),
     emailRetryMessage: z.string().max(500).optional().nullable(),
     emailSubject: z.string().max(200).optional().nullable(),
-    emailBody: z.string().max(10000).optional().nullable(),
+    emailBody: z.string().max(50000).optional().nullable(),
+    mailroomBrand: z.string().max(120).optional().nullable(),
+    mailroomBrandName: z.string().max(200).optional().nullable(),
+    mailroomListId: z.string().max(120).optional().nullable(),
+    mailroomListName: z.string().max(200).optional().nullable(),
     // Empty string means "no tracked link"; a URL sets one.
     trackedDestinationUrl: z
       .union([z.string().url(), z.literal("")])
@@ -94,6 +99,11 @@ const createAutomationSchema = z
         Boolean(d.openingDmButtonLabel?.trim())),
     { message: "Opening DM needs a message and a button label", path: ["openingDmMessage"] }
   )
+  // Without email capture, the DM is the whole reply, so it needs text.
+  .refine((d) => d.emailCaptureEnabled || Boolean(d.dmMessage.trim()), {
+    message: "Write the DM to send",
+    path: ["dmMessage"],
+  })
   // Email capture needs the DM that asks, and the email that answers.
   .refine(
     (d) =>
@@ -117,7 +127,7 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
-  dmMessage: z.string().min(1).max(1000).optional(),
+  dmMessage: z.string().max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
   openingDmButtonLabel: z.string().max(64).optional().nullable(),
@@ -136,7 +146,11 @@ const updateAutomationSchema = z.object({
   emailConfirmMessage: z.string().max(1000).optional().nullable(),
   emailRetryMessage: z.string().max(500).optional().nullable(),
   emailSubject: z.string().max(200).optional().nullable(),
-  emailBody: z.string().max(10000).optional().nullable(),
+  emailBody: z.string().max(50000).optional().nullable(),
+  mailroomBrand: z.string().max(120).optional().nullable(),
+  mailroomBrandName: z.string().max(200).optional().nullable(),
+  mailroomListId: z.string().max(120).optional().nullable(),
+  mailroomListName: z.string().max(200).optional().nullable(),
   isActive: z.boolean().optional(),
   wholeWordMatch: z.boolean().optional(),
   reportShareEnabled: z.boolean().optional(),
@@ -407,7 +421,6 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
-      dmMessage: parsed.data.dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
         ? parsed.data.openingDmMessage || null
@@ -452,6 +465,15 @@ export async function POST(request: NextRequest) {
         : null,
       emailBody: parsed.data.emailCaptureEnabled
         ? parsed.data.emailBody?.trim() || null
+        : null,
+      dmMessage: parsed.data.dmMessage,
+      mailroomBrand: parsed.data.emailCaptureEnabled ? parsed.data.mailroomBrand || null : null,
+      mailroomBrandName: parsed.data.emailCaptureEnabled
+        ? parsed.data.mailroomBrandName || null
+        : null,
+      mailroomListId: parsed.data.emailCaptureEnabled ? parsed.data.mailroomListId || null : null,
+      mailroomListName: parsed.data.emailCaptureEnabled
+        ? parsed.data.mailroomListName || null
         : null,
       isActive: parsed.data.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
@@ -552,6 +574,27 @@ export async function PATCH(request: NextRequest) {
     automationData.emailRetryMessage = null;
     automationData.emailSubject = null;
     automationData.emailBody = null;
+    automationData.mailroomBrand = null;
+    automationData.mailroomBrandName = null;
+    automationData.mailroomListId = null;
+    automationData.mailroomListName = null;
+  }
+  // A list without its brand (or the other way round) cannot be synced to.
+  if (automationData.mailroomBrand === null || automationData.mailroomListId === null) {
+    automationData.mailroomBrand = null;
+    automationData.mailroomBrandName = null;
+    automationData.mailroomListId = null;
+    automationData.mailroomListName = null;
+  }
+  // A DM with no text is only valid when the email ask fills it.
+  {
+    const merged = { ...existing, ...automationData };
+    if (!merged.emailCaptureEnabled && !merged.dmMessage?.trim()) {
+      return NextResponse.json(
+        { success: false, error: "Write the DM to send" },
+        { status: 400 }
+      );
+    }
   }
   // Enabling email capture on an existing campaign needs the same three
   // fields the create path insists on; the merged row is what has to be valid.

@@ -76,6 +76,7 @@ model Workspace {
   dmsSentThisPeriod Int      @default(0)
 
   zernioConnection  ZernioConnection?
+  mailroomConnection MailroomConnection?
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
@@ -214,6 +215,13 @@ model Automation {
   emailRetryMessage   String?
   emailSubject        String?
   emailBody           String?
+  // Optional Mailroom destination for captured leads: a brand (id or slug)
+  // and one of its lists. Names are kept for display so the campaign page
+  // does not need a Mailroom round trip.
+  mailroomBrand       String?
+  mailroomBrandName   String?
+  mailroomListId      String?
+  mailroomListName    String?
   isActive       Boolean @default(true)
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
@@ -445,6 +453,9 @@ model Lead {
   emailSentAt        DateTime?
   emailError         String?
   emailAttempts      Int      @default(0)
+  mailroomContactId  String?
+  mailroomSyncedAt   DateTime?
+  mailroomError      String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -478,6 +489,18 @@ model EmailCaptureRequest {
 
   @@unique([instagramAccountId, igUserId])
   @@index([expiresAt])
+}
+
+/// A workspace's Mailroom (self-hosted email platform) API connection. The key
+/// is encrypted with ENCRYPTION_KEY like every other credential.
+model MailroomConnection {
+  workspaceId String   @id
+  baseUrl     String
+  apiKey      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model PostbackDelivery {

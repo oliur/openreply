@@ -22,8 +22,16 @@ import {
   type InstagramContext,
 } from "@/lib/instagram/provider";
 import { renderMessageWithoutLink } from "@/lib/tracking/message";
-import { sendEmail } from "@/lib/email/send";
-import { getDMQueue, LEAD_EMAIL_JOB_NAME, type SendLeadEmailJob } from "./client";
+import { htmlToText, looksLikeHtml, sendEmail } from "@/lib/email/send";
+import {
+  getDMQueue,
+  LEAD_EMAIL_JOB_NAME,
+  LEAD_MAILROOM_JOB_NAME,
+  type SendLeadEmailJob,
+  type SyncLeadToMailroomJob,
+} from "./client";
+import { upsertContact } from "@/lib/mailroom/client";
+import { getMailroomConnection } from "@/lib/mailroom/connection";
 
 /** How long a prompt stays "open" for a reply. */
 export const EMAIL_CAPTURE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -233,6 +241,8 @@ export async function handleEmailCaptureReply({
       emailSentAt: null,
       emailError: null,
       emailAttempts: 0,
+      mailroomSyncedAt: null,
+      mailroomError: null,
     },
   });
   await forgetRequest(request.id);
@@ -241,6 +251,12 @@ export async function handleEmailCaptureReply({
   await getDMQueue().add(LEAD_EMAIL_JOB_NAME, queueJob, {
     jobId: `leademail_${lead.id}_${lead.capturedAt.getTime()}`,
   });
+  if (automation.mailroomBrand && automation.mailroomListId) {
+    const syncJob: SyncLeadToMailroomJob = { leadId: lead.id, mailroom: true };
+    await getDMQueue().add(LEAD_MAILROOM_JOB_NAME, syncJob, {
+      jobId: `leadmailroom_${lead.id}_${lead.capturedAt.getTime()}`,
+    });
+  }
 
   const logBase = {
     workspaceId: automation.workspaceId,
@@ -310,10 +326,15 @@ export function renderLeadEmail({
   body: string;
   username: string | null;
   email: string;
-}): { subject: string; text: string } {
+}): { subject: string; text: string; html?: string } {
   const fill = (text: string) =>
     text.replace(/\{username\}/gi, username ?? "there").replace(/\{email\}/gi, email);
-  return { subject: fill(subject).trim(), text: fill(body).trim() };
+  const filledSubject = fill(subject).trim();
+  if (looksLikeHtml(body)) {
+    const html = fill(body).trim();
+    return { subject: filledSubject, text: htmlToText(html), html };
+  }
+  return { subject: filledSubject, text: fill(body).trim() };
 }
 
 /** Queue handler: send the campaign's email to a lead, once. */
@@ -348,4 +369,46 @@ export async function processLeadEmail(job: Job<SendLeadEmailJob>): Promise<void
     where: { id: lead.id },
     data: { emailSentAt: new Date(), emailError: null, emailAttempts: { increment: 1 } },
   });
+}
+
+/** Queue handler: add a lead to the campaign's Mailroom list, once. */
+export async function processLeadMailroomSync(
+  job: Job<SyncLeadToMailroomJob>
+): Promise<void> {
+  const lead = await prisma.lead.findUnique({
+    where: { id: job.data.leadId },
+    include: { automation: true },
+  });
+  if (!lead || lead.mailroomSyncedAt) return;
+  const { mailroomBrand, mailroomListId } = lead.automation;
+  if (!mailroomBrand || !mailroomListId) return;
+
+  const connection = await getMailroomConnection(lead.workspaceId);
+  if (!connection) {
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { mailroomError: "Mailroom is not connected in Settings" },
+    });
+    return;
+  }
+
+  try {
+    const contact = await upsertContact(connection, mailroomBrand, {
+      email: lead.email,
+      firstName: lead.username,
+      listIds: [mailroomListId],
+      tags: ["openreply"],
+      source: "openreply",
+    });
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { mailroomContactId: contact?.id ?? null, mailroomSyncedAt: new Date(), mailroomError: null },
+    });
+  } catch (error) {
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: { mailroomError: formatError(error) },
+    });
+    throw error;
+  }
 }

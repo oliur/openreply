@@ -18,6 +18,8 @@ import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import RichTextEditor, { looksLikeHtml, plainTextToHtml } from "@/components/rich-text-editor";
+import Link from "next/link";
 import { readCache, writeCache } from "@/lib/client-cache";
 import {
   IMPORT_QUEUE_KEY,
@@ -55,6 +57,10 @@ interface LoadedCampaign {
   emailRetryMessage?: string | null;
   emailSubject?: string | null;
   emailBody?: string | null;
+  mailroomBrand?: string | null;
+  mailroomBrandName?: string | null;
+  mailroomListId?: string | null;
+  mailroomListName?: string | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -194,6 +200,14 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [emailRetryMessage, setEmailRetryMessage] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
+  const [mailroomBrand, setMailroomBrand] = useState("");
+  const [mailroomListId, setMailroomListId] = useState("");
+  const [mailroom, setMailroom] = useState<{
+    configured: boolean;
+    brands: { id: string; name: string; slug: string }[];
+    error?: string | null;
+  } | null>(null);
+  const [mailroomLists, setMailroomLists] = useState<{ id: string; name: string }[]>([]);
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -307,11 +321,45 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setEmailConfirmMessage(c.emailConfirmMessage ?? "");
         setEmailRetryMessage(c.emailRetryMessage ?? "");
         setEmailSubject(c.emailSubject ?? "");
-        setEmailBody(c.emailBody ?? "");
+        const storedBody = c.emailBody ?? "";
+        setEmailBody(
+          storedBody && !looksLikeHtml(storedBody) ? plainTextToHtml(storedBody) : storedBody
+        );
+        setMailroomBrand(c.mailroomBrand ?? "");
+        setMailroomListId(c.mailroomListId ?? "");
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
   }, [mode, campaignId]);
+
+  // Mailroom destination pickers: brands come with the connection state, lists
+  // follow the chosen brand. Loaded only once email capture is switched on.
+  useEffect(() => {
+    if (!emailCaptureEnabled || mailroom) return;
+    fetch("/api/mailroom/settings", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload) => {
+        if (payload.success) setMailroom(payload.data);
+        else setMailroom({ configured: false, brands: [], error: payload.error });
+      })
+      .catch(() => setMailroom({ configured: false, brands: [] }));
+  }, [emailCaptureEnabled, mailroom]);
+
+  useEffect(() => {
+    if (!emailCaptureEnabled || !mailroomBrand || !mailroom?.configured) return;
+    let cancelled = false;
+    fetch(`/api/mailroom/lists?brand=${encodeURIComponent(mailroomBrand)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then((payload) => {
+        if (!cancelled) setMailroomLists(payload.success ? payload.data.lists : []);
+      })
+      .catch(() => {
+        if (!cancelled) setMailroomLists([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [emailCaptureEnabled, mailroomBrand, mailroom?.configured]);
 
   // Track which posts on the selected account are already assigned to an
   // automation, so the picker can highlight them. The campaign being edited is
@@ -411,7 +459,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       return setError(t("Pick a post or reel to trigger the campaign."));
     if (matchMode === "specific" && keywords.length === 0)
       return setError(t("Add at least one keyword, or switch to any word."));
-    if (!dmMessage.trim()) return setError(t("Add the DM with the link."));
+    if (!dmMessage.trim() && !emailCaptureEnabled)
+      return setError(t("Add the DM with the link."));
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError(t("Your opening DM needs a message and a button label."));
     if (
@@ -460,6 +509,16 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       emailRetryMessage: emailCaptureEnabled ? emailRetryMessage.trim() : "",
       emailSubject: emailCaptureEnabled ? emailSubject.trim() : "",
       emailBody: emailCaptureEnabled ? emailBody.trim() : "",
+      mailroomBrand: emailCaptureEnabled && mailroomListId ? mailroomBrand : null,
+      mailroomBrandName:
+        emailCaptureEnabled && mailroomListId
+          ? mailroom?.brands.find((b) => b.id === mailroomBrand || b.slug === mailroomBrand)?.name ?? null
+          : null,
+      mailroomListId: emailCaptureEnabled && mailroomListId ? mailroomListId : null,
+      mailroomListName:
+        emailCaptureEnabled && mailroomListId
+          ? mailroomLists.find((l) => l.id === mailroomListId)?.name ?? null
+          : null,
       isActive: activeValue,
     };
 
@@ -895,11 +954,17 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
         <Section title={t("And then, they will get")}>
           <div className="rounded-lg border border-border p-3 space-y-2">
-            <span className="text-sm text-foreground">{t("a DM with a link")}</span>
+            <span className="text-sm text-foreground">
+              {emailCaptureEnabled ? t("a DM") : t("a DM with a link")}
+            </span>
             <textarea
               value={dmMessage}
               onChange={(e) => setDmMessage(e.target.value)}
-              placeholder={t("Write a message")}
+              placeholder={
+                emailCaptureEnabled
+                  ? t("Optional. Leave empty to send only the email ask below.")
+                  : t("Write a message")
+              }
               rows={3}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
               maxLength={1000}
@@ -1067,17 +1132,60 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted">{t("Email body")}</label>
-                  <textarea
+                  <RichTextEditor
                     value={emailBody}
-                    onChange={(e) => setEmailBody(e.target.value)}
+                    onChange={setEmailBody}
                     placeholder={t("Hey! Thanks for commenting. Here's the guide I promised: https://example.com/guide")}
-                    rows={6}
-                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-y"
-                    maxLength={10000}
                   />
                 </div>
+                <div className="space-y-1 rounded-lg border border-border p-3">
+                  <span className="text-sm text-foreground">{t("Also add them to a Mailroom list")}</span>
+                  {!mailroom ? (
+                    <p className="text-xs text-muted">{t("Loading…")}</p>
+                  ) : !mailroom.configured ? (
+                    <p className="text-xs text-muted">
+                      {t("Connect Mailroom in Settings to add leads to a list.")}{" "}
+                      <Link href="/settings" className="text-accent hover:underline">
+                        {t("Settings")}
+                      </Link>
+                    </p>
+                  ) : (
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <select
+                        value={mailroomBrand}
+                        onChange={(e) => {
+                          setMailroomBrand(e.target.value);
+                          setMailroomListId("");
+                          setMailroomLists([]);
+                        }}
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                      >
+                        <option value="">{t("No brand (don't add to Mailroom)")}</option>
+                        {mailroom.brands.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={mailroomListId}
+                        onChange={(e) => setMailroomListId(e.target.value)}
+                        disabled={!mailroomBrand}
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">{t("Choose a list")}</option>
+                        {mailroomLists.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name}
+                          </option>
+                        ))}
+                      </select>
+                      {mailroom.error && <p className="text-xs text-error sm:col-span-2">{mailroom.error}</p>}
+                    </div>
+                  )}
+                </div>
                 <p className="text-xs text-muted">
-                  {t("Sent as plain text from this instance's login email address.")}
+                  {t("Sent from this instance's login email address.")}
                   {" {username}"} {t("and")} {"{email}"} {t("personalize the DMs and the email. Captured addresses appear on the Leads page.")}
                 </p>
               </div>
@@ -1104,7 +1212,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             openingDmEnabled={openingDmEnabled}
             openingDmMessage={openingDmMessage}
             openingDmButtonLabel={openingDmButtonLabel}
-            revealMessage={dmMessage}
+            revealMessage={
+              emailCaptureEnabled && emailPromptMessage.trim()
+                ? [dmMessage.trim(), emailPromptMessage.trim()].filter(Boolean).join("\n\n")
+                : dmMessage
+            }
             hasLink={Boolean(trackedDestinationUrl.trim())}
             linkButtonLabel={linkButtonLabel || "Open link"}
             linkUrl={trackedDestinationUrl.trim() || undefined}

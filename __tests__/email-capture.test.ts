@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockPrisma, mockSendDirectMessage, mockQueueAdd, mockSendEmail, mockCreateContext } =
-  vi.hoisted(() => ({
+const {
+  mockPrisma,
+  mockSendDirectMessage,
+  mockQueueAdd,
+  mockSendEmail,
+  mockCreateContext,
+  mockUpsertContact,
+  mockGetMailroomConnection,
+} = vi.hoisted(() => ({
     mockPrisma: {
       instagramAccount: { findFirst: vi.fn() },
       emailCaptureRequest: {
@@ -17,6 +24,8 @@ const { mockPrisma, mockSendDirectMessage, mockQueueAdd, mockSendEmail, mockCrea
     mockQueueAdd: vi.fn(),
     mockSendEmail: vi.fn(),
     mockCreateContext: vi.fn(),
+    mockUpsertContact: vi.fn(),
+    mockGetMailroomConnection: vi.fn(),
   }));
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
@@ -25,17 +34,24 @@ vi.mock("@/lib/instagram/provider", () => ({
   hasInstagramCredentials: (account: { accessToken?: string }) => Boolean(account.accessToken),
   sendDirectMessage: mockSendDirectMessage,
 }));
-vi.mock("@/lib/email/send", () => ({ sendEmail: mockSendEmail }));
+vi.mock("@/lib/email/send", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email/send")>()),
+  sendEmail: mockSendEmail,
+}));
 vi.mock("@/lib/queue/client", () => ({
   getDMQueue: () => ({ add: mockQueueAdd }),
   LEAD_EMAIL_JOB_NAME: "send-lead-email",
+  LEAD_MAILROOM_JOB_NAME: "sync-lead-mailroom",
 }));
+vi.mock("@/lib/mailroom/client", () => ({ upsertContact: mockUpsertContact }));
+vi.mock("@/lib/mailroom/connection", () => ({ getMailroomConnection: mockGetMailroomConnection }));
 
 import {
   appendEmailPrompt,
   extractEmail,
   handleEmailCaptureReply,
   processLeadEmail,
+  processLeadMailroomSync,
   registerEmailCapture,
   renderLeadEmail,
 } from "@/lib/queue/email-capture";
@@ -61,6 +77,8 @@ const automation = {
   emailRetryMessage: "Just your email please",
   emailSubject: "Your guide, {username}",
   emailBody: "Hey {username}, here it is.",
+  mailroomBrand: null as string | null,
+  mailroomListId: null as string | null,
 };
 
 function pendingRequest(overrides: Partial<Record<string, unknown>> = {}) {
@@ -253,6 +271,17 @@ describe("lead email", () => {
     ).toEqual({ subject: "Hi there", text: "Sent to me@example.com\n\nbye" });
   });
 
+  it("keeps editor HTML and derives the plain-text part", () => {
+    const rendered = renderLeadEmail({
+      subject: "Guide",
+      body: '<p>Hey <strong>{username}</strong></p><p>Grab it: <a href="https://x.io/g">the guide</a></p><ul><li>one</li><li>two</li></ul>',
+      username: "alex",
+      email: "me@example.com",
+    });
+    expect(rendered.html).toContain("<strong>alex</strong>");
+    expect(rendered.text).toBe("Hey alex\nGrab it: the guide (https://x.io/g)\n- one\n- two");
+  });
+
   it("sends once and records the result", async () => {
     mockPrisma.lead.findUnique.mockResolvedValue({
       id: "lead_1",
@@ -291,6 +320,89 @@ describe("lead email", () => {
     ).rejects.toThrow("smtp down");
     expect(mockPrisma.lead.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ emailError: "smtp down" }) })
+    );
+  });
+});
+
+describe("Mailroom sync", () => {
+  const withList = { ...automation, mailroomBrand: "oliur", mailroomListId: "list_1" };
+
+  it("queues a sync only when the campaign has a list", async () => {
+    mockPrisma.emailCaptureRequest.findUnique.mockResolvedValue(pendingRequest());
+    await handleEmailCaptureReply({
+      instagramAccountId: "17841400000",
+      senderId: "user_9",
+      messageId: "mid_2",
+      operationId: "op",
+      messageText: "me@example.com",
+    });
+    expect(mockQueueAdd).not.toHaveBeenCalledWith("sync-lead-mailroom", expect.anything(), expect.anything());
+
+    vi.clearAllMocks();
+    mockPrisma.instagramAccount.findFirst.mockResolvedValue(account);
+    mockPrisma.lead.upsert.mockResolvedValue({ id: "lead_1", capturedAt: new Date(0) });
+    mockPrisma.emailCaptureRequest.findUnique.mockResolvedValue(pendingRequest({ automation: withList }));
+    await handleEmailCaptureReply({
+      instagramAccountId: "17841400000",
+      senderId: "user_9",
+      messageId: "mid_3",
+      operationId: "op",
+      messageText: "me@example.com",
+    });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "sync-lead-mailroom",
+      { leadId: "lead_1", mailroom: true },
+      expect.objectContaining({ jobId: "leadmailroom_lead_1_0" })
+    );
+  });
+
+  it("upserts the contact into the list and records the sync", async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: "lead_1",
+      workspaceId: "ws_1",
+      email: "me@example.com",
+      username: "alex",
+      mailroomSyncedAt: null,
+      automation: withList,
+    });
+    mockGetMailroomConnection.mockResolvedValue({ baseUrl: "https://mail.example", apiKey: "mr_x" });
+    mockUpsertContact.mockResolvedValue({ id: "contact_1", email: "me@example.com", status: "subscribed" });
+    await processLeadMailroomSync({ data: { leadId: "lead_1", mailroom: true } } as Job<{ leadId: string; mailroom: true }>);
+    expect(mockUpsertContact).toHaveBeenCalledWith(
+      { baseUrl: "https://mail.example", apiKey: "mr_x" },
+      "oliur",
+      expect.objectContaining({ email: "me@example.com", firstName: "alex", listIds: ["list_1"] })
+    );
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ mailroomContactId: "contact_1", mailroomSyncedAt: expect.any(Date) }),
+      })
+    );
+  });
+
+  it("records a missing connection without retrying, and a Mailroom error with a retry", async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: "lead_1",
+      workspaceId: "ws_1",
+      email: "me@example.com",
+      username: null,
+      mailroomSyncedAt: null,
+      automation: withList,
+    });
+    mockGetMailroomConnection.mockResolvedValue(null);
+    await processLeadMailroomSync({ data: { leadId: "lead_1", mailroom: true } } as Job<{ leadId: string; mailroom: true }>);
+    expect(mockUpsertContact).not.toHaveBeenCalled();
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { mailroomError: "Mailroom is not connected in Settings" } })
+    );
+
+    mockGetMailroomConnection.mockResolvedValue({ baseUrl: "https://mail.example", apiKey: "mr_x" });
+    mockUpsertContact.mockRejectedValue(new Error("Mailroom: list not found"));
+    await expect(
+      processLeadMailroomSync({ data: { leadId: "lead_1", mailroom: true } } as Job<{ leadId: string; mailroom: true }>)
+    ).rejects.toThrow("list not found");
+    expect(mockPrisma.lead.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: { mailroomError: "Mailroom: list not found" } })
     );
   });
 });
