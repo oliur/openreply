@@ -12,6 +12,8 @@ import nodemailer from "nodemailer";
 export interface OutboundEmail {
   to: string;
   subject: string;
+  /** Display name to show as the sender; the address always stays EMAIL_FROM's. */
+  fromName?: string | null;
   /** Plain-text version; derived from `html` when omitted. */
   text?: string;
   /** Body HTML (from the rich-text editor); rendered from `text` when omitted. */
@@ -86,12 +88,21 @@ export function getEmailFrom(): string {
   return process.env.EMAIL_FROM ?? "OpenReply <login@example.com>";
 }
 
+/** EMAIL_FROM with its display name replaced, e.g. "Oliur" <noreply@x.com>. */
+export function formatFrom(fromName?: string | null): string {
+  const base = getEmailFrom();
+  const name = fromName?.trim().replace(/[\r\n"<>]/g, "");
+  if (!name) return base;
+  const address = /<([^>]+)>/.exec(base)?.[1] ?? base.trim();
+  return `"${name}" <${address}>`;
+}
+
 export function hasEmailTransport(): boolean {
   return Boolean(process.env.EMAIL_SERVER || process.env.RESEND_API_KEY);
 }
 
 export async function sendEmail(email: OutboundEmail): Promise<void> {
-  const from = getEmailFrom();
+  const from = formatFrom(email.fromName);
   const text = email.text ?? (email.html ? htmlToText(email.html) : "");
   const html = email.html ? wrapHtml(email.html) : textToHtml(text);
 

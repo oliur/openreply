@@ -215,6 +215,9 @@ model Automation {
   emailRetryMessage   String?
   emailSubject        String?
   emailBody           String?
+  // Display name on the reply email ("Oliur" <noreply@...>); the address is
+  // always EMAIL_FROM's, since the mail server only permits that sender.
+  emailFromName       String?
   // Optional Mailroom destination for captured leads: a brand (id or slug)
   // and one of its lists. Names are kept for display so the campaign page
   // does not need a Mailroom round trip.

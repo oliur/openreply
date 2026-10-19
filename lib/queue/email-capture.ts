@@ -357,7 +357,7 @@ export async function processLeadEmail(job: Job<SendLeadEmailJob>): Promise<void
 
   const rendered = renderLeadEmail({ subject, body, username: lead.username, email: lead.email });
   try {
-    await sendEmail({ to: lead.email, ...rendered });
+    await sendEmail({ to: lead.email, fromName: lead.automation.emailFromName, ...rendered });
   } catch (error) {
     await prisma.lead.update({
       where: { id: lead.id },

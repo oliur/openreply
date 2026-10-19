@@ -77,6 +77,7 @@ const automation = {
   emailRetryMessage: "Just your email please",
   emailSubject: "Your guide, {username}",
   emailBody: "Hey {username}, here it is.",
+  emailFromName: "Oliur",
   mailroomBrand: null as string | null,
   mailroomListId: null as string | null,
 };
@@ -293,6 +294,7 @@ describe("lead email", () => {
     await processLeadEmail({ data: { leadId: "lead_1" } } as Job<{ leadId: string }>);
     expect(mockSendEmail).toHaveBeenCalledWith({
       to: "me@example.com",
+      fromName: "Oliur",
       subject: "Your guide, alex",
       text: "Hey alex, here it is.",
     });
@@ -404,5 +406,19 @@ describe("Mailroom sync", () => {
     expect(mockPrisma.lead.update).toHaveBeenLastCalledWith(
       expect.objectContaining({ data: { mailroomError: "Mailroom: list not found" } })
     );
+  });
+});
+
+describe("formatFrom", () => {
+  it("swaps the display name and keeps the configured address", async () => {
+    const { formatFrom } = await import("@/lib/email/send");
+    process.env.EMAIL_FROM = "OpenReply <noreply@oliur.com>";
+    expect(formatFrom("Oliur")).toBe('"Oliur" <noreply@oliur.com>');
+    expect(formatFrom(' Oli "ur"\r\n<x> ')).toBe('"Oli urx" <noreply@oliur.com>');
+    expect(formatFrom("")).toBe("OpenReply <noreply@oliur.com>");
+    expect(formatFrom(null)).toBe("OpenReply <noreply@oliur.com>");
+    process.env.EMAIL_FROM = "bare@oliur.com";
+    expect(formatFrom("Oliur")).toBe('"Oliur" <bare@oliur.com>');
+    delete process.env.EMAIL_FROM;
   });
 });

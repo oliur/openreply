@@ -63,6 +63,7 @@ const createAutomationSchema = z
     emailRetryMessage: z.string().max(500).optional().nullable(),
     emailSubject: z.string().max(200).optional().nullable(),
     emailBody: z.string().max(50000).optional().nullable(),
+    emailFromName: z.string().max(100).optional().nullable(),
     mailroomBrand: z.string().max(120).optional().nullable(),
     mailroomBrandName: z.string().max(200).optional().nullable(),
     mailroomListId: z.string().max(120).optional().nullable(),
@@ -147,6 +148,7 @@ const updateAutomationSchema = z.object({
   emailRetryMessage: z.string().max(500).optional().nullable(),
   emailSubject: z.string().max(200).optional().nullable(),
   emailBody: z.string().max(50000).optional().nullable(),
+  emailFromName: z.string().max(100).optional().nullable(),
   mailroomBrand: z.string().max(120).optional().nullable(),
   mailroomBrandName: z.string().max(200).optional().nullable(),
   mailroomListId: z.string().max(120).optional().nullable(),
@@ -467,6 +469,9 @@ export async function POST(request: NextRequest) {
         ? parsed.data.emailBody?.trim() || null
         : null,
       dmMessage: parsed.data.dmMessage,
+      emailFromName: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailFromName?.trim() || null
+        : null,
       mailroomBrand: parsed.data.emailCaptureEnabled ? parsed.data.mailroomBrand || null : null,
       mailroomBrandName: parsed.data.emailCaptureEnabled
         ? parsed.data.mailroomBrandName || null
@@ -574,6 +579,7 @@ export async function PATCH(request: NextRequest) {
     automationData.emailRetryMessage = null;
     automationData.emailSubject = null;
     automationData.emailBody = null;
+    automationData.emailFromName = null;
     automationData.mailroomBrand = null;
     automationData.mailroomBrandName = null;
     automationData.mailroomListId = null;

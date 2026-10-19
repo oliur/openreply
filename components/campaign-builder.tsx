@@ -57,6 +57,7 @@ interface LoadedCampaign {
   emailRetryMessage?: string | null;
   emailSubject?: string | null;
   emailBody?: string | null;
+  emailFromName?: string | null;
   mailroomBrand?: string | null;
   mailroomBrandName?: string | null;
   mailroomListId?: string | null;
@@ -200,6 +201,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [emailRetryMessage, setEmailRetryMessage] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
+  const [emailFromName, setEmailFromName] = useState("");
   const [mailroomBrand, setMailroomBrand] = useState("");
   const [mailroomListId, setMailroomListId] = useState("");
   const [mailroom, setMailroom] = useState<{
@@ -325,6 +327,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setEmailBody(
           storedBody && !looksLikeHtml(storedBody) ? plainTextToHtml(storedBody) : storedBody
         );
+        setEmailFromName(c.emailFromName ?? "");
         setMailroomBrand(c.mailroomBrand ?? "");
         setMailroomListId(c.mailroomListId ?? "");
       })
@@ -509,6 +512,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       emailRetryMessage: emailCaptureEnabled ? emailRetryMessage.trim() : "",
       emailSubject: emailCaptureEnabled ? emailSubject.trim() : "",
       emailBody: emailCaptureEnabled ? emailBody.trim() : "",
+      emailFromName: emailCaptureEnabled ? emailFromName.trim() : "",
       mailroomBrand: emailCaptureEnabled && mailroomListId ? mailroomBrand : null,
       mailroomBrandName:
         emailCaptureEnabled && mailroomListId
@@ -1118,6 +1122,20 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                     maxLength={500}
                   />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("Sender name")}</label>
+                  <input
+                    type="text"
+                    value={emailFromName}
+                    onChange={(e) => setEmailFromName(e.target.value)}
+                    placeholder={t("Your name or brand, e.g. Oliur")}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    maxLength={100}
+                  />
+                  <p className="text-xs text-muted">
+                    {t("Shown as the From name. The address stays your instance's login sender.")}
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs text-muted">{t("Email subject")}</label>

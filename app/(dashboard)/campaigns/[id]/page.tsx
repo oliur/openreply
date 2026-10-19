@@ -40,6 +40,7 @@ interface Campaign {
   emailConfirmMessage?: string | null;
   emailSubject?: string | null;
   emailBody?: string | null;
+  emailFromName?: string | null;
   mailroomBrandName?: string | null;
   mailroomListName?: string | null;
   _count?: { dmLogs?: number; leads?: number };
@@ -310,6 +311,12 @@ export default function CampaignDetailPage() {
               <>
                 <p className="text-xs text-muted">{t("DM after they reply with an email")}</p>
                 <FieldBox>{campaign.emailConfirmMessage}</FieldBox>
+              </>
+            )}
+            {campaign.emailFromName && (
+              <>
+                <p className="text-xs text-muted">{t("Sender name")}</p>
+                <FieldBox>{campaign.emailFromName}</FieldBox>
               </>
             )}
             <p className="text-xs text-muted">{t("Email subject")}</p>
