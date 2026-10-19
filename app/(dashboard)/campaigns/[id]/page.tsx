@@ -41,6 +41,7 @@ interface Campaign {
   emailSubject?: string | null;
   emailBody?: string | null;
   emailFromName?: string | null;
+  emailFromAddress?: string | null;
   mailroomBrandName?: string | null;
   mailroomListName?: string | null;
   _count?: { dmLogs?: number; leads?: number };
@@ -313,10 +314,14 @@ export default function CampaignDetailPage() {
                 <FieldBox>{campaign.emailConfirmMessage}</FieldBox>
               </>
             )}
-            {campaign.emailFromName && (
+            {(campaign.emailFromName || campaign.emailFromAddress) && (
               <>
-                <p className="text-xs text-muted">{t("Sender name")}</p>
-                <FieldBox>{campaign.emailFromName}</FieldBox>
+                <p className="text-xs text-muted">{t("Sender")}</p>
+                <FieldBox>
+                  {[campaign.emailFromName, campaign.emailFromAddress && `<${campaign.emailFromAddress}>`]
+                    .filter(Boolean)
+                    .join(" ")}
+                </FieldBox>
               </>
             )}
             <p className="text-xs text-muted">{t("Email subject")}</p>

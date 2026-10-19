@@ -58,6 +58,7 @@ interface LoadedCampaign {
   emailSubject?: string | null;
   emailBody?: string | null;
   emailFromName?: string | null;
+  emailFromAddress?: string | null;
   mailroomBrand?: string | null;
   mailroomBrandName?: string | null;
   mailroomListId?: string | null;
@@ -202,6 +203,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [emailSubject, setEmailSubject] = useState("");
   const [emailBody, setEmailBody] = useState("");
   const [emailFromName, setEmailFromName] = useState("");
+  const [emailFromAddress, setEmailFromAddress] = useState("");
   const [mailroomBrand, setMailroomBrand] = useState("");
   const [mailroomListId, setMailroomListId] = useState("");
   const [mailroom, setMailroom] = useState<{
@@ -328,6 +330,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           storedBody && !looksLikeHtml(storedBody) ? plainTextToHtml(storedBody) : storedBody
         );
         setEmailFromName(c.emailFromName ?? "");
+        setEmailFromAddress(c.emailFromAddress ?? "");
         setMailroomBrand(c.mailroomBrand ?? "");
         setMailroomListId(c.mailroomListId ?? "");
       })
@@ -513,6 +516,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       emailSubject: emailCaptureEnabled ? emailSubject.trim() : "",
       emailBody: emailCaptureEnabled ? emailBody.trim() : "",
       emailFromName: emailCaptureEnabled ? emailFromName.trim() : "",
+      emailFromAddress: emailCaptureEnabled ? emailFromAddress.trim() : "",
       mailroomBrand: emailCaptureEnabled && mailroomListId ? mailroomBrand : null,
       mailroomBrandName:
         emailCaptureEnabled && mailroomListId
@@ -1133,8 +1137,21 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     maxLength={100}
                   />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("Sender email")}</label>
+                  <input
+                    type="email"
+                    value={emailFromAddress}
+                    onChange={(e) => setEmailFromAddress(e.target.value)}
+                    placeholder={t("Leave empty for the default sender")}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    maxLength={254}
+                  />
                   <p className="text-xs text-muted">
-                    {t("Shown as the From name. The address stays your instance's login sender.")}
+                    {mailroomBrand && mailroomListId
+                      ? t("Sent through Mailroom as the brand chosen below. The address must be on one of that brand's verified domains; empty uses the brand's default sender.")
+                      : t("Without a Mailroom brand below, emails go out from your instance's login sender and only the name applies.")}
                   </p>
                 </div>
                 <div className="space-y-1">

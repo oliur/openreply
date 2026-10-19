@@ -22,7 +22,7 @@ import {
   type InstagramContext,
 } from "@/lib/instagram/provider";
 import { renderMessageWithoutLink } from "@/lib/tracking/message";
-import { htmlToText, looksLikeHtml, sendEmail } from "@/lib/email/send";
+import { htmlToText, looksLikeHtml, sendEmail, textToHtml } from "@/lib/email/send";
 import {
   getDMQueue,
   LEAD_EMAIL_JOB_NAME,
@@ -30,7 +30,7 @@ import {
   type SendLeadEmailJob,
   type SyncLeadToMailroomJob,
 } from "./client";
-import { upsertContact } from "@/lib/mailroom/client";
+import { sendTransactionalEmail, upsertContact } from "@/lib/mailroom/client";
 import { getMailroomConnection } from "@/lib/mailroom/connection";
 
 /** How long a prompt stays "open" for a reply. */
@@ -357,7 +357,7 @@ export async function processLeadEmail(job: Job<SendLeadEmailJob>): Promise<void
 
   const rendered = renderLeadEmail({ subject, body, username: lead.username, email: lead.email });
   try {
-    await sendEmail({ to: lead.email, fromName: lead.automation.emailFromName, ...rendered });
+    await deliverLeadEmail(lead, rendered);
   } catch (error) {
     await prisma.lead.update({
       where: { id: lead.id },
@@ -411,4 +411,42 @@ export async function processLeadMailroomSync(
     });
     throw error;
   }
+}
+
+/**
+ * Route the email: through Mailroom's Send API as the campaign's brand when
+ * one is selected (so the From address can be any verified sender of that
+ * brand), otherwise through the instance's own transport as EMAIL_FROM.
+ */
+async function deliverLeadEmail(
+  lead: {
+    id: string;
+    email: string;
+    workspaceId: string;
+    capturedAt: Date;
+    automation: {
+      emailFromName: string | null;
+      emailFromAddress: string | null;
+      mailroomBrand: string | null;
+    };
+  },
+  rendered: { subject: string; text: string; html?: string }
+): Promise<void> {
+  const { emailFromName, emailFromAddress, mailroomBrand } = lead.automation;
+  const connection = mailroomBrand ? await getMailroomConnection(lead.workspaceId) : null;
+  if (mailroomBrand && connection) {
+    const address = emailFromAddress?.trim();
+    const result = await sendTransactionalEmail(connection, mailroomBrand, {
+      to: lead.email,
+      subject: rendered.subject,
+      html: rendered.html ?? textToHtml(rendered.text),
+      from: address ? { email: address, name: emailFromName } : null,
+      idempotencyKey: `openreply-lead-${lead.id}-${lead.capturedAt.getTime()}`,
+      tags: ["openreply"],
+    });
+    if (result.status === "suppressed")
+      throw new Error("Mailroom suppressed this address (bounce or complaint on record)");
+    return;
+  }
+  await sendEmail({ to: lead.email, fromName: emailFromName, ...rendered });
 }

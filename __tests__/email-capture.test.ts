@@ -8,6 +8,7 @@ const {
   mockCreateContext,
   mockUpsertContact,
   mockGetMailroomConnection,
+  mockSendTransactional,
 } = vi.hoisted(() => ({
     mockPrisma: {
       instagramAccount: { findFirst: vi.fn() },
@@ -26,6 +27,7 @@ const {
     mockCreateContext: vi.fn(),
     mockUpsertContact: vi.fn(),
     mockGetMailroomConnection: vi.fn(),
+    mockSendTransactional: vi.fn(),
   }));
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
@@ -43,7 +45,10 @@ vi.mock("@/lib/queue/client", () => ({
   LEAD_EMAIL_JOB_NAME: "send-lead-email",
   LEAD_MAILROOM_JOB_NAME: "sync-lead-mailroom",
 }));
-vi.mock("@/lib/mailroom/client", () => ({ upsertContact: mockUpsertContact }));
+vi.mock("@/lib/mailroom/client", () => ({
+  upsertContact: mockUpsertContact,
+  sendTransactionalEmail: mockSendTransactional,
+}));
 vi.mock("@/lib/mailroom/connection", () => ({ getMailroomConnection: mockGetMailroomConnection }));
 
 import {
@@ -78,6 +83,7 @@ const automation = {
   emailSubject: "Your guide, {username}",
   emailBody: "Hey {username}, here it is.",
   emailFromName: "Oliur",
+  emailFromAddress: null as string | null,
   mailroomBrand: null as string | null,
   mailroomListId: null as string | null,
 };
@@ -420,5 +426,80 @@ describe("formatFrom", () => {
     process.env.EMAIL_FROM = "bare@oliur.com";
     expect(formatFrom("Oliur")).toBe('"Oliur" <bare@oliur.com>');
     delete process.env.EMAIL_FROM;
+  });
+});
+
+describe("lead email through Mailroom", () => {
+  const branded = {
+    ...automation,
+    mailroomBrand: "platsupply",
+    mailroomListId: "list_1",
+    emailFromName: "PlatSupply",
+    emailFromAddress: "hello@platsupply.com",
+  };
+
+  it("sends as the brand with the campaign's From when a brand is selected", async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: "lead_1",
+      workspaceId: "ws_1",
+      email: "me@example.com",
+      username: "alex",
+      emailSentAt: null,
+      capturedAt: new Date(0),
+      automation: branded,
+    });
+    mockGetMailroomConnection.mockResolvedValue({ baseUrl: "https://mail.example", apiKey: "mr_x" });
+    mockSendTransactional.mockResolvedValue({ id: "msg_1", to: "me@example.com", status: "queued" });
+    await processLeadEmail({ data: { leadId: "lead_1" } } as Job<{ leadId: string }>);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+    expect(mockSendTransactional).toHaveBeenCalledWith(
+      { baseUrl: "https://mail.example", apiKey: "mr_x" },
+      "platsupply",
+      expect.objectContaining({
+        to: "me@example.com",
+        subject: "Your guide, alex",
+        from: { email: "hello@platsupply.com", name: "PlatSupply" },
+        idempotencyKey: "openreply-lead-lead_1-0",
+      })
+    );
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ emailSentAt: expect.any(Date) }) })
+    );
+  });
+
+  it("falls back to the instance sender when the brand has no connection, and surfaces suppression", async () => {
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: "lead_1",
+      workspaceId: "ws_1",
+      email: "me@example.com",
+      username: null,
+      emailSentAt: null,
+      capturedAt: new Date(0),
+      automation: branded,
+    });
+    mockGetMailroomConnection.mockResolvedValue(null);
+    mockSendEmail.mockResolvedValue(undefined);
+    await processLeadEmail({ data: { leadId: "lead_1" } } as Job<{ leadId: string }>);
+    expect(mockSendTransactional).not.toHaveBeenCalled();
+    expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ fromName: "PlatSupply" }));
+
+    vi.clearAllMocks();
+    mockPrisma.lead.findUnique.mockResolvedValue({
+      id: "lead_1",
+      workspaceId: "ws_1",
+      email: "me@example.com",
+      username: null,
+      emailSentAt: null,
+      capturedAt: new Date(0),
+      automation: branded,
+    });
+    mockGetMailroomConnection.mockResolvedValue({ baseUrl: "https://mail.example", apiKey: "mr_x" });
+    mockSendTransactional.mockResolvedValue({ id: "msg_2", to: "me@example.com", status: "suppressed" });
+    await expect(
+      processLeadEmail({ data: { leadId: "lead_1" } } as Job<{ leadId: string }>)
+    ).rejects.toThrow(/suppressed/);
+    expect(mockPrisma.lead.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ emailError: expect.stringMatching(/suppressed/) }) })
+    );
   });
 });

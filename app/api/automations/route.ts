@@ -64,6 +64,7 @@ const createAutomationSchema = z
     emailSubject: z.string().max(200).optional().nullable(),
     emailBody: z.string().max(50000).optional().nullable(),
     emailFromName: z.string().max(100).optional().nullable(),
+    emailFromAddress: z.union([z.string().email().max(254), z.literal("")]).optional().nullable(),
     mailroomBrand: z.string().max(120).optional().nullable(),
     mailroomBrandName: z.string().max(200).optional().nullable(),
     mailroomListId: z.string().max(120).optional().nullable(),
@@ -149,6 +150,7 @@ const updateAutomationSchema = z.object({
   emailSubject: z.string().max(200).optional().nullable(),
   emailBody: z.string().max(50000).optional().nullable(),
   emailFromName: z.string().max(100).optional().nullable(),
+  emailFromAddress: z.union([z.string().email().max(254), z.literal("")]).optional().nullable(),
   mailroomBrand: z.string().max(120).optional().nullable(),
   mailroomBrandName: z.string().max(200).optional().nullable(),
   mailroomListId: z.string().max(120).optional().nullable(),
@@ -472,6 +474,9 @@ export async function POST(request: NextRequest) {
       emailFromName: parsed.data.emailCaptureEnabled
         ? parsed.data.emailFromName?.trim() || null
         : null,
+      emailFromAddress: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailFromAddress?.trim().toLowerCase() || null
+        : null,
       mailroomBrand: parsed.data.emailCaptureEnabled ? parsed.data.mailroomBrand || null : null,
       mailroomBrandName: parsed.data.emailCaptureEnabled
         ? parsed.data.mailroomBrandName || null
@@ -580,11 +585,14 @@ export async function PATCH(request: NextRequest) {
     automationData.emailSubject = null;
     automationData.emailBody = null;
     automationData.emailFromName = null;
+    automationData.emailFromAddress = null;
     automationData.mailroomBrand = null;
     automationData.mailroomBrandName = null;
     automationData.mailroomListId = null;
     automationData.mailroomListName = null;
   }
+  if (automationData.emailFromAddress !== undefined)
+    automationData.emailFromAddress = automationData.emailFromAddress?.trim().toLowerCase() || null;
   // A list without its brand (or the other way round) cannot be synced to.
   if (automationData.mailroomBrand === null || automationData.mailroomListId === null) {
     automationData.mailroomBrand = null;

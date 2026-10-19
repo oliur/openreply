@@ -218,6 +218,10 @@ model Automation {
   // Display name on the reply email ("Oliur" <noreply@...>); the address is
   // always EMAIL_FROM's, since the mail server only permits that sender.
   emailFromName       String?
+  // With a Mailroom brand selected, the reply email is sent through Mailroom's
+  // Send API as that brand, optionally from this address (which must be on one
+  // of the brand's verified domains). Without a brand, EMAIL_FROM is used.
+  emailFromAddress    String?
   // Optional Mailroom destination for captured leads: a brand (id or slug)
   // and one of its lists. Names are kept for display so the campaign page
   // does not need a Mailroom round trip.

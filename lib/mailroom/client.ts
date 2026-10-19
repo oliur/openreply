@@ -142,3 +142,51 @@ export async function upsertContact(
   });
   return result.data;
 }
+
+export interface MailroomSendResult {
+  id: string;
+  to: string;
+  status: "queued" | "suppressed" | "test";
+}
+
+/**
+ * Send one transactional email as a brand through Mailroom's Send API. Raw
+ * content, full-HTML layout (no brand chrome), no open or click tracking: the
+ * campaign owner's words, nothing else. `from` must be on a verified domain of
+ * the brand; omit it to use the brand's default sender.
+ */
+export async function sendTransactionalEmail(
+  connection: MailroomConnectionInput,
+  brand: string,
+  input: {
+    to: string;
+    subject: string;
+    html: string;
+    from?: { email: string; name?: string | null } | null;
+    idempotencyKey?: string;
+    tags?: string[];
+  }
+): Promise<MailroomSendResult> {
+  const result = await mailroomRequest<{ data: MailroomSendResult[] }>({
+    connection,
+    path: `/brands/${encodeURIComponent(brand)}/transactional/send`,
+    method: "POST",
+    body: {
+      to: input.to,
+      subject: input.subject,
+      content: input.html,
+      contentFormat: "html",
+      layout: "none",
+      trackOpens: false,
+      trackClicks: false,
+      ...(input.from
+        ? { from: { email: input.from.email, ...(input.from.name ? { name: input.from.name } : {}) } }
+        : {}),
+      ...(input.tags?.length ? { tags: input.tags } : {}),
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
+    },
+  });
+  const first = result.data?.[0];
+  if (!first) throw new MailroomApiError(502, "Mailroom accepted the email but returned no message");
+  return first;
+}
