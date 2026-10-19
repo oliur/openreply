@@ -34,7 +34,15 @@ const {
     },
     instagramAccount: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
+    emailCaptureRequest: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    },
+    lead: { upsert: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     operationalEvent: {
       create: vi.fn(),
     },
@@ -119,6 +127,7 @@ vi.mock("@/lib/queue/client", () => ({
   POSTBACK_JOB_NAME: "process-postback",
   FOLLOWUP_JOB_NAME: "process-followup",
   MESSAGE_JOB_NAME: "process-message",
+  LEAD_EMAIL_JOB_NAME: "send-lead-email",
 }));
 
 vi.mock("bullmq", () => {

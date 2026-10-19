@@ -13,6 +13,8 @@ import {
   MESSAGE_JOB_NAME,
   POSTBACK_JOB_NAME,
   FOLLOWUP_JOB_NAME,
+  LEAD_EMAIL_JOB_NAME,
+  type SendLeadEmailJob,
   type DmQueueJob,
   type ProcessCommentJob,
   type ProcessMessageJob,
@@ -54,6 +56,12 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { hashRecipientId } from "@/lib/tracking/server";
 
 import { ZernioApiError } from "@/lib/zernio/client";
+import {
+  appendEmailPrompt,
+  handleEmailCaptureReply,
+  processLeadEmail,
+  registerEmailCapture,
+} from "./email-capture";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -184,10 +192,14 @@ function buildInlineLinkFallback(
 }
 
 type RevealAutomation = {
+  id: string;
+  instagramAccountId: string;
   dmMessage: string;
   linkButtonLabel: string | null;
   trackedLinks: WorkerTrackedLink[];
   instagramAccount: { instagramId: string };
+  emailCaptureEnabled: boolean;
+  emailPromptMessage: string | null;
 };
 
 /**
@@ -213,21 +225,30 @@ async function sendRevealDirectMessage({
       context: accessToken,
       instagramAccountId: automation.instagramAccount.instagramId,
       userId: userId,
-      message: renderMessageWithTracking({
-        message: automation.dmMessage,
+      message: appendEmailPrompt({
+        automation,
         commenterName,
-        trackedLinks: automation.trackedLinks,
+        text: renderMessageWithTracking({
+          message: automation.dmMessage,
+          commenterName,
+          trackedLinks: automation.trackedLinks,
+        }),
       }),
     });
+    await registerEmailCapture({ automation, userId, username: commenterName });
     return;
   }
 
   // Try button template first; if Meta rejects it, fall back to inline links.
-  const bodyText =
-    renderMessageWithoutLink({
-      message: automation.dmMessage,
-      commenterName,
-    }) || "Here's your link:";
+  const bodyText = appendEmailPrompt({
+    automation,
+    commenterName,
+    text:
+      renderMessageWithoutLink({
+        message: automation.dmMessage,
+        commenterName,
+      }) || "Here's your link:",
+  });
   const recipientToken = hashRecipientId(userId);
   const buttons = buildLinkButtons(
     automation.trackedLinks,
@@ -257,23 +278,30 @@ async function sendRevealDirectMessage({
         context: accessToken,
         instagramAccountId: automation.instagramAccount.instagramId,
         userId: userId,
-        message: buildInlineLinkFallback(
-          automation.dmMessage,
+        message: appendEmailPrompt({
+          automation,
           commenterName,
-          automation.trackedLinks,
-          bodyText,
-          recipientToken
-        ),
+          text: buildInlineLinkFallback(
+            automation.dmMessage,
+            commenterName,
+            automation.trackedLinks,
+            bodyText,
+            recipientToken
+          ),
+        }),
       });
     } catch (fallbackError) {
       throw classifySendError(fallbackError);
     }
   }
+  await registerEmailCapture({ automation, userId, username: commenterName });
 }
 
 
 function connectionScope(data: DmQueueJob) {
-  return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
+  return "accountConnectionId" in data && data.accountConnectionId
+    ? { instagramAccountId: data.accountConnectionId }
+    : {};
 }
 
 async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
@@ -698,11 +726,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         });
       } else if (automation.trackedLinks.length > 0) {
         // Try button template first; if Meta rejects it, fall back to inline links.
-        const bodyText =
-          renderMessageWithoutLink({
-            message: automation.dmMessage,
-            commenterName,
-          }) || "Here's your link:";
+        const bodyText = appendEmailPrompt({
+          automation,
+          commenterName,
+          text:
+            renderMessageWithoutLink({
+              message: automation.dmMessage,
+              commenterName,
+            }) || "Here's your link:",
+        });
         const buttons = buildLinkButtons(
           automation.trackedLinks,
           automation.linkButtonLabel,
@@ -728,13 +760,17 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             "[DM Worker] Button template rejected, falling back to inline link:",
             formatError(buttonError)
           );
-          const fallbackMessage = buildInlineLinkFallback(
-            automation.dmMessage,
+          const fallbackMessage = appendEmailPrompt({
+            automation,
             commenterName,
-            automation.trackedLinks,
-            bodyText,
-            hashRecipientId(commenterId)
-          );
+            text: buildInlineLinkFallback(
+              automation.dmMessage,
+              commenterName,
+              automation.trackedLinks,
+              bodyText,
+              hashRecipientId(commenterId)
+            ),
+          });
           try {
             await sendPrivateReply({
               context: accessToken,
@@ -748,11 +784,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           }
         }
       } else {
-        const dmMessage = renderMessageWithTracking({
-          message: automation.dmMessage,
+        const dmMessage = appendEmailPrompt({
+          automation,
           commenterName,
-          trackedLinks: automation.trackedLinks,
-          recipientToken: hashRecipientId(commenterId),
+          text: renderMessageWithTracking({
+            message: automation.dmMessage,
+            commenterName,
+            trackedLinks: automation.trackedLinks,
+            recipientToken: hashRecipientId(commenterId),
+          }),
         });
         await sendPrivateReply({
           context: accessToken,
@@ -764,6 +804,16 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       }
 
       delivered = true;
+      // The reveal (and its email prompt) went out, so start listening for the
+      // reply. The opening-DM and follow-prompt branches register later, when
+      // the button tap delivers the reveal.
+      if (!useOpeningDm && !sendFollowPrompt) {
+        await registerEmailCapture({
+          automation,
+          userId: commenterId,
+          username: commenterName,
+        });
+      }
       await prisma.dmLog.update({
         where: {
           automationId_commentId: {
@@ -1279,6 +1329,18 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const { instagramAccountId, messageId, messageText, senderId } = job.data;
 
+  // Someone we just asked for an email is replying: take the address (or
+  // re-ask once) instead of treating the reply as a keyword.
+  const consumedByEmailCapture = await handleEmailCaptureReply({
+    instagramAccountId,
+    accountConnectionId: job.data.accountConnectionId,
+    senderId,
+    messageText,
+    messageId,
+    operationId: `${job.id}:email-capture`,
+  });
+  if (consumedByEmailCapture) return;
+
   const automations = await prisma.automation.findMany({
     where: {
       ...connectionScope(job.data),
@@ -1540,6 +1602,9 @@ async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === FOLLOWUP_JOB_NAME) {
     return processFollowUp(job as Job<ProcessFollowUpJob>);
   }
+  if (job.name === LEAD_EMAIL_JOB_NAME) {
+    return processLeadEmail(job as Job<SendLeadEmailJob>);
+  }
   if (job.name === MESSAGE_JOB_NAME) {
     return processMessage(job as Job<ProcessMessageJob>);
   }
@@ -1564,7 +1629,10 @@ async function recordWorkerFailure(
   error: Error
 ) {
   try {
-    const instagramAccountId = job?.data.instagramAccountId;
+    const instagramAccountId =
+      job && "instagramAccountId" in job.data
+        ? job.data.instagramAccountId
+        : undefined;
     const commentId =
       job && "commentId" in job.data ? job.data.commentId : null;
     const account = instagramAccountId

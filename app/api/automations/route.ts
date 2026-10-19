@@ -56,6 +56,12 @@ const createAutomationSchema = z
       .max(10)
       .optional()
       .default([]),
+    emailCaptureEnabled: z.boolean().optional().default(false),
+    emailPromptMessage: z.string().max(500).optional().nullable(),
+    emailConfirmMessage: z.string().max(1000).optional().nullable(),
+    emailRetryMessage: z.string().max(500).optional().nullable(),
+    emailSubject: z.string().max(200).optional().nullable(),
+    emailBody: z.string().max(10000).optional().nullable(),
     // Empty string means "no tracked link"; a URL sets one.
     trackedDestinationUrl: z
       .union([z.string().url(), z.literal("")])
@@ -87,6 +93,18 @@ const createAutomationSchema = z
       (Boolean(d.openingDmMessage?.trim()) &&
         Boolean(d.openingDmButtonLabel?.trim())),
     { message: "Opening DM needs a message and a button label", path: ["openingDmMessage"] }
+  )
+  // Email capture needs the DM that asks, and the email that answers.
+  .refine(
+    (d) =>
+      !d.emailCaptureEnabled ||
+      (Boolean(d.emailPromptMessage?.trim()) &&
+        Boolean(d.emailSubject?.trim()) &&
+        Boolean(d.emailBody?.trim())),
+    {
+      message: "Email capture needs a prompt message, an email subject and an email body",
+      path: ["emailPromptMessage"],
+    }
   );
 
 const updateAutomationSchema = z.object({
@@ -113,6 +131,12 @@ const updateAutomationSchema = z.object({
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
+  emailCaptureEnabled: z.boolean().optional(),
+  emailPromptMessage: z.string().max(500).optional().nullable(),
+  emailConfirmMessage: z.string().max(1000).optional().nullable(),
+  emailRetryMessage: z.string().max(500).optional().nullable(),
+  emailSubject: z.string().max(200).optional().nullable(),
+  emailBody: z.string().max(10000).optional().nullable(),
   isActive: z.boolean().optional(),
   wholeWordMatch: z.boolean().optional(),
   reportShareEnabled: z.boolean().optional(),
@@ -152,7 +176,7 @@ export async function GET(request: NextRequest) {
         select: { username: true, instagramId: true },
       },
       _count: {
-        select: { dmLogs: true },
+        select: { dmLogs: true, leads: true },
       },
       trackedLinks: {
         select: {
@@ -413,6 +437,22 @@ export async function POST(request: NextRequest) {
       publicReplyMessage: parsed.data.publicReplyEnabled
         ? publicReplyList[0] ?? parsed.data.publicReplyMessage ?? null
         : null,
+      emailCaptureEnabled: parsed.data.emailCaptureEnabled,
+      emailPromptMessage: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailPromptMessage?.trim() || null
+        : null,
+      emailConfirmMessage: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailConfirmMessage?.trim() || null
+        : null,
+      emailRetryMessage: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailRetryMessage?.trim() || null
+        : null,
+      emailSubject: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailSubject?.trim() || null
+        : null,
+      emailBody: parsed.data.emailCaptureEnabled
+        ? parsed.data.emailBody?.trim() || null
+        : null,
       isActive: parsed.data.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
       workspaceId,
@@ -505,6 +545,31 @@ export async function PATCH(request: NextRequest) {
   if (automationData.followUpEnabled === false) {
     automationData.followUpMessage = null;
     automationData.followUpDelayMinutes = 0;
+  }
+  if (automationData.emailCaptureEnabled === false) {
+    automationData.emailPromptMessage = null;
+    automationData.emailConfirmMessage = null;
+    automationData.emailRetryMessage = null;
+    automationData.emailSubject = null;
+    automationData.emailBody = null;
+  }
+  // Enabling email capture on an existing campaign needs the same three
+  // fields the create path insists on; the merged row is what has to be valid.
+  if (automationData.emailCaptureEnabled === true) {
+    const merged = { ...existing, ...automationData };
+    if (
+      !merged.emailPromptMessage?.trim() ||
+      !merged.emailSubject?.trim() ||
+      !merged.emailBody?.trim()
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Email capture needs a prompt message, an email subject and an email body",
+        },
+        { status: 400 }
+      );
+    }
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {

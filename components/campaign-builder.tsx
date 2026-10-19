@@ -49,6 +49,12 @@ interface LoadedCampaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  emailCaptureEnabled?: boolean;
+  emailPromptMessage?: string | null;
+  emailConfirmMessage?: string | null;
+  emailRetryMessage?: string | null;
+  emailSubject?: string | null;
+  emailBody?: string | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -182,6 +188,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  const [emailCaptureEnabled, setEmailCaptureEnabled] = useState(false);
+  const [emailPromptMessage, setEmailPromptMessage] = useState("");
+  const [emailConfirmMessage, setEmailConfirmMessage] = useState("");
+  const [emailRetryMessage, setEmailRetryMessage] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -290,6 +302,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        setEmailCaptureEnabled(c.emailCaptureEnabled ?? false);
+        setEmailPromptMessage(c.emailPromptMessage ?? "");
+        setEmailConfirmMessage(c.emailConfirmMessage ?? "");
+        setEmailRetryMessage(c.emailRetryMessage ?? "");
+        setEmailSubject(c.emailSubject ?? "");
+        setEmailBody(c.emailBody ?? "");
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -396,6 +414,13 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     if (!dmMessage.trim()) return setError(t("Add the DM with the link."));
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError(t("Your opening DM needs a message and a button label."));
+    if (
+      emailCaptureEnabled &&
+      (!emailPromptMessage.trim() || !emailSubject.trim() || !emailBody.trim())
+    )
+      return setError(
+        t("Email capture needs the DM that asks, plus an email subject and body.")
+      );
 
     setSaving(true);
 
@@ -429,6 +454,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      emailCaptureEnabled,
+      emailPromptMessage: emailCaptureEnabled ? emailPromptMessage.trim() : "",
+      emailConfirmMessage: emailCaptureEnabled ? emailConfirmMessage.trim() : "",
+      emailRetryMessage: emailCaptureEnabled ? emailRetryMessage.trim() : "",
+      emailSubject: emailCaptureEnabled ? emailSubject.trim() : "",
+      emailBody: emailCaptureEnabled ? emailBody.trim() : "",
       isActive: activeValue,
     };
 
@@ -971,6 +1002,83 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                     ? t("Sent {minutes} min after they tap through.", { minutes: followUpDelayMinutes })
                     : t("Sent right after they tap through.")}
                   {" {username}"} {t("personalizes it. Max 24 hours, to stay inside Instagram's messaging window.")}
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="mt-3 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-foreground">
+                {t("ask for their email and reply by email")}
+              </span>
+              <Toggle
+                on={emailCaptureEnabled}
+                onToggle={() => setEmailCaptureEnabled(!emailCaptureEnabled)}
+              />
+            </div>
+            {emailCaptureEnabled && (
+              <div className="mt-3 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("DM asking for their email")}</label>
+                  <textarea
+                    value={emailPromptMessage}
+                    onChange={(e) => setEmailPromptMessage(e.target.value)}
+                    placeholder={t("Reply with your email and I'll send the full guide straight to your inbox 📩")}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={500}
+                  />
+                  <p className="text-xs text-muted">
+                    {t("Added to the end of the DM above. Their next reply is checked for an email address.")}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("DM after they reply with an email")}</label>
+                  <textarea
+                    value={emailConfirmMessage}
+                    onChange={(e) => setEmailConfirmMessage(e.target.value)}
+                    placeholder={t("Got it! Check your inbox in a minute 📬")}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("DM if the reply has no email (sent once)")}</label>
+                  <textarea
+                    value={emailRetryMessage}
+                    onChange={(e) => setEmailRetryMessage(e.target.value)}
+                    placeholder={t("I couldn't spot an email in that. Reply with just your email address 🙏")}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={500}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("Email subject")}</label>
+                  <input
+                    type="text"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    placeholder={t("Here's your guide")}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    maxLength={200}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted">{t("Email body")}</label>
+                  <textarea
+                    value={emailBody}
+                    onChange={(e) => setEmailBody(e.target.value)}
+                    placeholder={t("Hey! Thanks for commenting. Here's the guide I promised: https://example.com/guide")}
+                    rows={6}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-y"
+                    maxLength={10000}
+                  />
+                </div>
+                <p className="text-xs text-muted">
+                  {t("Sent as plain text from this instance's login email address.")}
+                  {" {username}"} {t("and")} {"{email}"} {t("personalize the DMs and the email. Captured addresses appear on the Leads page.")}
                 </p>
               </div>
             )}

@@ -35,6 +35,12 @@ interface Campaign {
   followUpEnabled: boolean;
   followUpMessage: string | null;
   followUpDelayMinutes: number | null;
+  emailCaptureEnabled?: boolean;
+  emailPromptMessage?: string | null;
+  emailConfirmMessage?: string | null;
+  emailSubject?: string | null;
+  emailBody?: string | null;
+  _count?: { dmLogs?: number; leads?: number };
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
@@ -288,6 +294,29 @@ export default function CampaignDetailPage() {
               {campaign.followUpDelayMinutes && campaign.followUpDelayMinutes > 0
                 ? t("Sent {minutes} min after the link.", { minutes: campaign.followUpDelayMinutes })
                 : t("Sent right after the link.")}
+            </p>
+          </Summary>
+        )}
+
+        {campaign.emailCaptureEnabled && campaign.emailPromptMessage && (
+          <Summary title={t("Then ask for their email")}>
+            <FieldBox>{campaign.emailPromptMessage}</FieldBox>
+            {campaign.emailConfirmMessage && (
+              <>
+                <p className="text-xs text-muted">{t("DM after they reply with an email")}</p>
+                <FieldBox>{campaign.emailConfirmMessage}</FieldBox>
+              </>
+            )}
+            <p className="text-xs text-muted">{t("Email subject")}</p>
+            <FieldBox>{campaign.emailSubject}</FieldBox>
+            <p className="text-xs text-muted">{t("Email body")}</p>
+            <FieldBox>
+              <span className="whitespace-pre-wrap">{campaign.emailBody}</span>
+            </FieldBox>
+            <p className="text-xs text-muted">
+              <Link href={`/leads?automationId=${campaign.id}`} className="text-accent hover:underline">
+                {t("{count} leads", { count: campaign._count?.leads ?? 0 })}
+              </Link>
             </p>
           </Summary>
         )}

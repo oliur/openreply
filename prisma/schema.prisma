@@ -85,6 +85,7 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  leads             Lead[]
 
   @@index([ownerId])
 }
@@ -144,6 +145,8 @@ model InstagramAccount {
   dmLogs      DmLog[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  leads       Lead[]
+  emailCaptureRequests EmailCaptureRequest[]
 
   @@index([workspaceId])
 }
@@ -201,6 +204,16 @@ model Automation {
   publicReplyEnabled Boolean @default(false)
   publicReplyMessage String?
   publicReplyMessages String[] @default([])
+  // Email capture: the reveal message ends with a prompt asking the person to
+  // reply with their email. The next inbound DM from them is parsed for one,
+  // stored as a Lead, acknowledged with emailConfirmMessage, and answered by
+  // email (emailSubject / emailBody) through the instance's own mail transport.
+  emailCaptureEnabled Boolean @default(false)
+  emailPromptMessage  String?
+  emailConfirmMessage String?
+  emailRetryMessage   String?
+  emailSubject        String?
+  emailBody           String?
   isActive       Boolean @default(true)
   wholeWordMatch Boolean @default(true)
   reportShareSlug    String? @unique
@@ -214,6 +227,8 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  leads            Lead[]
+  emailCaptureRequests EmailCaptureRequest[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -415,6 +430,56 @@ model ZernioConnection {
 }
 
 // Claims persist independently of BullMQ retention so old taps never resend.
+/// An email address a commenter sent back after a campaign asked for one.
+/// One row per person per campaign; a second reply with a different address
+/// overwrites the first and is emailed again.
+model Lead {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  automationId       String
+  instagramAccountId String
+  igUserId           String
+  username           String?
+  email              String
+  capturedAt         DateTime @default(now())
+  emailSentAt        DateTime?
+  emailError         String?
+  emailAttempts      Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, igUserId])
+  @@index([workspaceId, capturedAt])
+  @@index([automationId])
+  @@index([instagramAccountId])
+  @@index([email])
+}
+
+/// "We asked this person for their email and are waiting for the reply." One
+/// per person per connected account, so the latest campaign to ask wins. Rows
+/// expire so a reply weeks later is treated as a normal DM, not an email.
+model EmailCaptureRequest {
+  id                 String   @id @default(cuid())
+  instagramAccountId String
+  automationId       String
+  igUserId           String
+  username           String?
+  promptCount        Int      @default(1)
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([instagramAccountId, igUserId])
+  @@index([expiresAt])
+}
+
 model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())

@@ -77,15 +77,23 @@ export interface ProcessMessageJob {
   senderId: string;
 }
 
+// Email a captured lead the campaign's reply. Enqueued once a Lead row holds
+// an address; the handler is idempotent on `emailSentAt`.
+export interface SendLeadEmailJob {
+  leadId: string;
+}
+
 export type DmQueueJob =
   | ProcessCommentJob
   | ProcessPostbackJob
   | ProcessFollowUpJob
-  | ProcessMessageJob;
+  | ProcessMessageJob
+  | SendLeadEmailJob;
 
 export const POSTBACK_JOB_NAME = "process-postback";
 export const FOLLOWUP_JOB_NAME = "process-followup";
 export const MESSAGE_JOB_NAME = "process-message";
+export const LEAD_EMAIL_JOB_NAME = "send-lead-email";
 
 let dmQueue: Queue<DmQueueJob> | null = null;
 
